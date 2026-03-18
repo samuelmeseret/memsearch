@@ -41,12 +41,13 @@ class VectorStore:
         text_summary: str = "",
         thumbnail_filename: str | None = None,
         file_size: int = 0,
+        filename: str | None = None,
     ) -> None:
         fid = self.file_id(file_path)
         metadata = {
             "file_path": file_path,
             "modality": modality,
-            "filename": Path(file_path).name,
+            "filename": filename or Path(file_path).name,
             "text_summary": text_summary[:1000],
             "file_size": file_size,
             "indexed_at": time.time(),

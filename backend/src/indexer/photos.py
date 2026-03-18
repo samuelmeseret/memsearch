@@ -206,6 +206,13 @@ def embed_and_store(
 
         thumb_filename = save_thumbnail(photo.file_id, photo.thumbnail_bytes)
 
+        # Build a readable filename from creation date or local identifier
+        display_name = photo.file_id.replace("photos://", "")
+        creation_ts = photo.asset_meta.get("creation_date")
+        if creation_ts:
+            dt = datetime.datetime.fromtimestamp(creation_ts)
+            display_name = f"Photo {dt.strftime('%Y-%m-%d %H:%M')}"
+
         store.upsert(
             file_path=photo.file_id,
             embedding=embedding,
@@ -213,6 +220,7 @@ def embed_and_store(
             text_summary=photo.text_summary,
             thumbnail_filename=thumb_filename,
             file_size=photo.file_size,
+            filename=display_name,
         )
         return True
     except Exception as e:
