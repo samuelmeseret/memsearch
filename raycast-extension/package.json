@@ -1,0 +1,54 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "memsearch",
+  "title": "Memory Search",
+  "description": "Search your local files using AI-powered semantic search",
+  "icon": "command-icon.png",
+  "author": "samuelmeseret",
+  "categories": ["Productivity"],
+  "license": "MIT",
+  "preferences": [
+    {
+      "name": "backendUrl",
+      "title": "Backend URL",
+      "description": "URL of the MemSearch backend server",
+      "type": "textfield",
+      "default": "http://localhost:7242",
+      "required": false
+    }
+  ],
+  "commands": [
+    {
+      "name": "search",
+      "title": "Memory Search",
+      "subtitle": "MemSearch",
+      "description": "Search your indexed files with natural language",
+      "mode": "view"
+    },
+    {
+      "name": "status",
+      "title": "Index Status",
+      "subtitle": "MemSearch",
+      "description": "View indexing status and manage the index",
+      "mode": "view"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.93.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^1.0.11",
+    "@types/node": "22.13.4",
+    "@types/react": "19.0.8",
+    "eslint": "^9.19.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint"
+  }
+}

@@ -1,0 +1,135 @@
+# MemSearch
+
+AI-powered semantic search for your Mac. Index local files and iCloud Photos, then search them with natural language using Google Gemini embeddings and ChromaDB.
+
+![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
+
+## What it does
+
+- **Indexes local files** — text files, PDFs, images (including HEIC) from any folder
+- **Indexes iCloud Photos** — connects directly to your Photos library via PhotoKit
+- **Semantic search** — find files by meaning, not just filenames
+- **Raycast integration** — search your files from anywhere on your Mac with a keystroke
+
+## Architecture
+
+```
+┌─────────────────────┐     HTTP      ┌──────────────────────────┐
+│  Raycast Extension  │ ◄──────────► │  FastAPI Backend (:7242) │
+│  (search UI)        │              │                          │
+└─────────────────────┘              │  ┌─ Gemini Embeddings    │
+                                     │  ├─ ChromaDB Storage     │
+                                     │  ├─ File Processors      │
+                                     │  │  (text, image, PDF)   │
+                                     │  └─ PhotoKit (iCloud)    │
+                                     └──────────────────────────┘
+```
+
+## Requirements
+
+- macOS (required for PhotoKit / iCloud Photos integration)
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
+- [Raycast](https://raycast.com) (for the search UI)
+- A [Google Gemini API key](https://aistudio.google.com/apikey)
+
+## Setup
+
+### 1. Backend
+
+```bash
+cd backend
+cp .env.example .env
+# Edit .env and add your Gemini API key
+```
+
+Install dependencies and run:
+
+```bash
+uv sync
+uv run memsearch serve
+```
+
+The server starts on `http://localhost:7242`.
+
+### 2. Raycast Extension
+
+```bash
+cd raycast-extension
+npm install
+npm run dev
+```
+
+This opens the extension in Raycast for development. Use "Memory Search" or "Index Status" commands.
+
+## Usage
+
+### CLI
+
+```bash
+# Index a folder
+uv run memsearch index ~/Documents
+
+# Index iCloud Photos
+uv run memsearch index-photos
+uv run memsearch index-photos --limit 100 --favorites
+
+# Search
+uv run memsearch search "notes about machine learning"
+uv run memsearch search "family vacation photos" -m image
+
+# Check status
+uv run memsearch status
+
+# Start the API server (required for Raycast)
+uv run memsearch serve
+```
+
+### Raycast
+
+Once the backend is running (`memsearch serve`), open Raycast and use:
+
+- **Memory Search** — type a natural language query to search your indexed files
+- **Index Status** — view stats, trigger reindexing, or clear the index
+
+### API
+
+The backend exposes a REST API on port 7242:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/search` | POST | Search with query, n_results, modality filter |
+| `/status` | GET | Index statistics |
+| `/index/start` | POST | Start indexing folders |
+| `/index/photos` | POST | Start indexing iCloud Photos |
+| `/index/stop` | POST | Cancel ongoing indexing |
+| `/config` | GET/PUT | View or update configuration |
+| `/index` | DELETE | Clear all indexed data |
+
+## Supported file types
+
+| Category | Formats |
+|---|---|
+| Images | HEIC, JPEG, PNG, GIF, WebP, TIFF, BMP |
+| Documents | PDF (text extraction + first page rendering) |
+| Text | `.txt`, `.md`, `.py`, `.js`, `.ts`, `.json`, `.yaml`, `.toml`, `.csv`, and more |
+
+## Configuration
+
+All settings use the `MEMSEARCH_` prefix and can be set in `backend/.env`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | (required) | Google Gemini API key |
+| `PORT` | `7242` | Server port |
+| `HOST` | `127.0.0.1` | Server host |
+| `CHROMA_DIR` | `~/Library/Application Support/MacMemorySearch/chroma` | ChromaDB storage path |
+| `THUMBNAIL_DIR` | `~/Library/Application Support/MacMemorySearch/thumbnails` | Thumbnail cache path |
+| `EMBEDDING_MODEL` | `gemini-embedding-2-preview` | Gemini embedding model |
+| `EMBEDDING_DIMENSIONS` | `768` | Embedding vector dimensions |
+| `MAX_FILE_SIZE_MB` | `50` | Maximum file size to index |
+| `MAX_CONCURRENT_EMBEDS` | `5` | Concurrent embedding requests |
+
+## License
+
+MIT

@@ -1,0 +1,30 @@
+[project]
+name = "memsearch"
+version = "0.1.0"
+description = "Multimodal Mac memory search using Gemini embeddings and ChromaDB"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "chromadb>=1.0",
+    "google-genai>=1.0",
+    "watchdog>=6.0",
+    "Pillow>=11.0",
+    "pillow-heif>=0.21",
+    "PyMuPDF>=1.25",
+    "pydantic-settings>=2.7",
+    "python-dotenv>=1.0",
+    "pyobjc-core>=12.1",
+    "pyobjc-framework-photos>=12.1",
+    "pyobjc-framework-cocoa>=12.1",
+]
+
+[project.scripts]
+memsearch = "src.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
