@@ -78,8 +78,9 @@ async function initBackend(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
-  // Set dock icon (needed for dev mode; packaged app uses icon.icns)
-  if (process.platform === 'darwin') {
+  // Set dock icon only in dev mode — packaged app uses icon.icns from the bundle,
+  // which macOS renders with the proper rounded superellipse mask.
+  if (is.dev && process.platform === 'darwin') {
     app.dock.setIcon(join(__dirname, '../../resources/icon.png'))
   }
 
