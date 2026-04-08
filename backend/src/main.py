@@ -129,6 +129,46 @@ def cmd_photos(args):
         print(f"  Skipped (already indexed): {result['skipped']}")
 
 
+def cmd_update_people(_args):
+    """Backfill person names on already-indexed photos without re-embedding."""
+    from .indexer.people import PeopleDatabase
+
+    store = VectorStore()
+    people_db = PeopleDatabase()
+
+    if not people_db.is_available:
+        print("Error: Could not read Photos.sqlite. People data unavailable.")
+        sys.exit(1)
+
+    print(f"Found {len(people_db.get_all_persons())} named people in Photos library")
+
+    # Get all photo entries from ChromaDB
+    all_data = store._collection.get(
+        where={"modality": "image"},
+        include=["metadatas"],
+    )
+
+    if not all_data["ids"]:
+        print("No photos in index.")
+        return
+
+    updated = 0
+    for doc_id, meta in zip(all_data["ids"], all_data["metadatas"]):
+        file_path = meta.get("file_path", "")
+        if not file_path.startswith("photos://"):
+            continue
+
+        asset_uuid = file_path.replace("photos://", "").split("/")[0]
+        person_names = people_db.get_persons_for_asset(asset_uuid)
+
+        if person_names:
+            meta["person_names"] = ",".join(person_names)
+            store._collection.update(ids=[doc_id], metadatas=[meta])
+            updated += 1
+
+    print(f"Updated {updated} photos with person tags.")
+
+
 def cmd_serve(_args):
     import uvicorn
     from .server import app
@@ -155,6 +195,10 @@ def main():
     p_photos.add_argument("--limit", type=int, default=None, help="Max photos to index")
     p_photos.add_argument("--favorites", action="store_true", help="Only index favorites")
     p_photos.set_defaults(func=cmd_photos)
+
+    # update-people
+    p_people = sub.add_parser("update-people", help="Backfill person names on indexed photos")
+    p_people.set_defaults(func=cmd_update_people)
 
     # search
     p_search = sub.add_parser("search", help="Search indexed files")

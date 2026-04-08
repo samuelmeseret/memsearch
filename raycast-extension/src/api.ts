@@ -1,5 +1,5 @@
 import { getPreferenceValues } from "@raycast/api";
-import { SearchResponse, IndexStatus } from "./types";
+import { SearchResponse, IndexStatus, PersonInfo } from "./types";
 
 function getBaseUrl(): string {
   const { backendUrl } = getPreferenceValues<{ backendUrl: string }>();
@@ -47,6 +47,13 @@ export async function stopIndexing(): Promise<void> {
 export async function clearIndex(): Promise<void> {
   const res = await fetch(`${getBaseUrl()}/index`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Clear failed: ${res.statusText}`);
+}
+
+export async function getPeople(): Promise<PersonInfo[]> {
+  const res = await fetch(`${getBaseUrl()}/people`);
+  if (!res.ok) throw new Error(`People failed: ${res.statusText}`);
+  const data = await res.json();
+  return data.people as PersonInfo[];
 }
 
 export function getThumbnailUrl(thumbnailFilename: string): string {

@@ -34,3 +34,13 @@ raycast-extension/node_modules/
 
 # Data
 *.chroma/
+
+# Electron build artifacts
+electron/dist/
+electron/out/
+electron/node_modules/
+
+# Large binaries
+*.dmg
+*.zip
+*.blockmap

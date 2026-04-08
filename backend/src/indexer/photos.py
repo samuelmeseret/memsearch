@@ -198,6 +198,7 @@ def embed_and_store(
     photo: PreparedPhoto,
     embedder: EmbeddingClient,
     store: VectorStore,
+    people_db=None,
 ) -> bool:
     """Embed a prepared photo via Gemini and store in ChromaDB. Thread-safe."""
     try:
@@ -213,14 +214,26 @@ def embed_and_store(
             dt = datetime.datetime.fromtimestamp(creation_ts)
             display_name = f"Photo {dt.strftime('%Y-%m-%d %H:%M')}"
 
+        # Look up person names from Photos.sqlite
+        person_names = []
+        if people_db:
+            asset_uuid = photo.file_id.replace("photos://", "").split("/")[0]
+            person_names = people_db.get_persons_for_asset(asset_uuid)
+
+        # Append person names to text summary for better semantic search
+        text_summary = photo.text_summary
+        if person_names:
+            text_summary += f" | People: {', '.join(person_names)}"
+
         store.upsert(
             file_path=photo.file_id,
             embedding=embedding,
             modality="image",
-            text_summary=photo.text_summary,
+            text_summary=text_summary,
             thumbnail_filename=thumb_filename,
             file_size=photo.file_size,
             filename=display_name,
+            person_names=person_names or None,
         )
         return True
     except Exception as e:
@@ -231,9 +244,10 @@ def embed_and_store(
 class PhotosIndexer:
     """Indexes iCloud Photos with concurrent embedding."""
 
-    def __init__(self, store: VectorStore, embedder: EmbeddingClient):
+    def __init__(self, store: VectorStore, embedder: EmbeddingClient, people_db=None):
         self.store = store
         self.embedder = embedder
+        self.people_db = people_db
         self._cancel = False
         self._is_indexing = False
         self._indexed_count = 0
@@ -380,7 +394,7 @@ class PhotosIndexer:
                 embed_start = time.time()
 
                 futures = {
-                    executor.submit(embed_and_store, photo, self.embedder, self.store): photo
+                    executor.submit(embed_and_store, photo, self.embedder, self.store, self.people_db): photo
                     for photo in prepared
                 }
 

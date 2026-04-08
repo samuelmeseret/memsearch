@@ -17,6 +17,7 @@ class SearchResult(BaseModel):
     text_summary: str = ""
     file_size: int = 0
     indexed_at: float = 0.0
+    person_names: str = ""
 
 
 class VectorStore:
@@ -42,6 +43,7 @@ class VectorStore:
         thumbnail_filename: str | None = None,
         file_size: int = 0,
         filename: str | None = None,
+        person_names: list[str] | None = None,
     ) -> None:
         fid = self.file_id(file_path)
         metadata = {
@@ -54,6 +56,8 @@ class VectorStore:
         }
         if thumbnail_filename:
             metadata["thumbnail_filename"] = thumbnail_filename
+        if person_names:
+            metadata["person_names"] = ",".join(person_names)
         self._collection.upsert(
             ids=[fid],
             embeddings=[embedding],
@@ -81,21 +85,33 @@ class VectorStore:
         query_embedding: list[float],
         n_results: int = 20,
         modality_filter: str | None = None,
+        person_names_filter: list[str] | None = None,
     ) -> list[SearchResult]:
         where = {"modality": modality_filter} if modality_filter else None
         count = self._collection.count()
         if count == 0:
             return []
-        n = min(n_results, count)
+        # Over-fetch when filtering by person (filter happens in Python)
+        if person_names_filter:
+            # Fetch more candidates — multi-person matches are sparse
+            fetch_n = min(count, max(n_results * 20, 500))
+        else:
+            fetch_n = min(n_results, count)
         results = self._collection.query(
             query_embeddings=[query_embedding],
-            n_results=n,
+            n_results=fetch_n,
             where=where,
             include=["metadatas", "distances"],
         )
         search_results = []
+        required_names = [n.lower() for n in person_names_filter] if person_names_filter else []
         if results["metadatas"] and results["distances"]:
             for meta, dist in zip(results["metadatas"][0], results["distances"][0]):
+                # Filter: photo must contain ALL requested people
+                if required_names:
+                    names = meta.get("person_names", "").lower()
+                    if not all(n in names for n in required_names):
+                        continue
                 score = 1.0 - dist  # cosine distance → similarity
                 search_results.append(
                     SearchResult(
@@ -107,8 +123,11 @@ class VectorStore:
                         text_summary=meta.get("text_summary", ""),
                         file_size=meta.get("file_size", 0),
                         indexed_at=meta.get("indexed_at", 0.0),
+                        person_names=meta.get("person_names", ""),
                     )
                 )
+                if len(search_results) >= n_results:
+                    break
         return search_results
 
     def delete(self, file_path: str) -> None:

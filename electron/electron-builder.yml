@@ -1,0 +1,36 @@
+appId: com.memsearch.app
+productName: MemSearch
+directories:
+  buildResources: resources
+  output: dist
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.*'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+  icon: resources/icon.icns
+  entitlementsInherit: entitlements.mac.plist
+  hardenedRuntime: true
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+extraResources:
+  - from: ../backend
+    to: backend
+    filter:
+      - '**/*'
+      - '!.venv/**'
+      - '!__pycache__/**'
+      - '!**/__pycache__/**'
+      - '!*.pyc'
+      - '!.env'

@@ -7,6 +7,12 @@ export interface SearchResult {
   text_summary: string;
   file_size: number;
   indexed_at: number;
+  person_names: string;
+}
+
+export interface PersonInfo {
+  name: string;
+  face_count: number;
 }
 
 export interface SearchResponse {
