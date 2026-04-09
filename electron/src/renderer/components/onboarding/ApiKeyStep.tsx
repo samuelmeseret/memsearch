@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Key, ExternalLink, Loader2 } from 'lucide-react'
+import { Key, ExternalLink } from 'lucide-react'
 import type { OnboardingData } from './OnboardingWizard'
 
 interface ApiKeyStepProps {
@@ -10,39 +10,14 @@ interface ApiKeyStepProps {
 }
 
 export function ApiKeyStep({ data, updateData, onNext, onBack }: ApiKeyStepProps): JSX.Element {
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const waitForBackend = async (maxWait = 15000): Promise<void> => {
-    const start = Date.now()
-    while (Date.now() - start < maxWait) {
-      try {
-        const res = await fetch('http://127.0.0.1:7242/status')
-        if (res.ok) return
-      } catch {
-        // not ready yet
-      }
-      await new Promise((r) => setTimeout(r, 500))
-    }
-  }
-
-  const handleContinue = async (): Promise<void> => {
+  const handleContinue = (): void => {
     if (!data.apiKey.trim()) {
       setError('Please enter your API key')
       return
     }
-    setSaving(true)
-    setError('')
-    try {
-      await window.api.setApiKey(data.apiKey.trim())
-      // Wait for backend to come back up after restart
-      await waitForBackend()
-      onNext()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save API key')
-    } finally {
-      setSaving(false)
-    }
+    onNext()
   }
 
   return (
@@ -95,17 +70,9 @@ export function ApiKeyStep({ data, updateData, onNext, onBack }: ApiKeyStepProps
         </button>
         <button
           onClick={handleContinue}
-          disabled={saving}
-          className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+          className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
         >
-          {saving ? (
-            <span className="flex items-center gap-1.5">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Saving...
-            </span>
-          ) : (
-            'Continue'
-          )}
+          Continue
         </button>
       </div>
     </div>

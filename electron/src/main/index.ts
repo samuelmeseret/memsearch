@@ -1,8 +1,15 @@
-import { app, BrowserWindow, shell, dialog, safeStorage } from 'electron'
+import { app, BrowserWindow, shell, safeStorage } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc'
-import { startBackend, stopBackend, getBackendStatus, onBackendStatusChange, BackendStatus } from './backend'
+import {
+  startBackend,
+  stopBackend,
+  getBackendStatus,
+  onBackendStatusChange,
+  onBackendDetailChange,
+  BackendStatus
+} from './backend'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -35,9 +42,13 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // Forward backend status to renderer
+  // Forward backend status and detail messages to renderer
   onBackendStatusChange((status: BackendStatus) => {
     mainWindow?.webContents.send('backend:status', status)
+  })
+
+  onBackendDetailChange((detail: string) => {
+    mainWindow?.webContents.send('backend:detail', detail)
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -59,16 +70,18 @@ function decryptApiKey(stored: string): string {
   return stored
 }
 
-async function getStoredApiKey(): Promise<string> {
+async function isOnboardingComplete(): Promise<boolean> {
   const Store = (await import('electron-store')).default
-  const store = new Store<{ apiKey: string }>()
-  const encrypted = store.get('apiKey', '')
-  return decryptApiKey(encrypted)
+  const store = new Store()
+  return !!store.get('onboardingComplete', false)
 }
 
 async function initBackend(): Promise<void> {
   try {
-    const apiKey = await getStoredApiKey()
+    const Store = (await import('electron-store')).default
+    const store = new Store<{ apiKey: string }>()
+    const encrypted = store.get('apiKey', '')
+    const apiKey = decryptApiKey(encrypted)
     await startBackend(apiKey)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error starting backend'
@@ -86,16 +99,23 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers()
   createWindow()
-  await initBackend()
+
+  // Only start backend automatically if onboarding is already done.
+  // During onboarding, the SetupStep handles starting the backend.
+  if (await isOnboardingComplete()) {
+    await initBackend()
+  }
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
     }
-    // Ensure backend is running when app is re-activated
-    const status = getBackendStatus()
-    if (status === 'stopped' || status === 'error') {
-      await initBackend()
+    // Ensure backend is running when app is re-activated (post-onboarding only)
+    if (await isOnboardingComplete()) {
+      const status = getBackendStatus()
+      if (status === 'stopped' || status === 'error') {
+        await initBackend()
+      }
     }
   })
 })

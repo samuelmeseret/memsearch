@@ -1,6 +1,6 @@
 {
   "name": "memsearch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AI-powered semantic search for macOS",
   "main": "./out/main/index.js",
   "scripts": {
@@ -11,21 +11,6 @@
   },
   "dependencies": {
     "electron-store": "^10.0.0"
-  },
-  "build": {
-    "appId": "com.memsearch.app",
-    "productName": "MemSearch",
-    "mac": {
-      "icon": "resources/icon.icns",
-      "category": "public.app-category.productivity"
-    },
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "out/**/*",
-      "resources/**/*"
-    ]
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.1",

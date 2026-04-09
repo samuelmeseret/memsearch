@@ -8,6 +8,9 @@ const api = {
   onBackendStatus: (cb: (status: string) => void): void => {
     ipcRenderer.on('backend:status', (_event, status) => cb(status))
   },
+  onBackendDetail: (cb: (detail: string) => void): void => {
+    ipcRenderer.on('backend:detail', (_event, detail) => cb(detail))
+  },
   restartBackend: (): Promise<void> => ipcRenderer.invoke('backend:restart'),
   getApiKey: (): Promise<string> => ipcRenderer.invoke('config:get-api-key'),
   setApiKey: (key: string): Promise<void> => ipcRenderer.invoke('config:set-api-key', key),

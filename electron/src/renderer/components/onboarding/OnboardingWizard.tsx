@@ -2,6 +2,7 @@ import { useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { WelcomeStep } from './WelcomeStep'
 import { ApiKeyStep } from './ApiKeyStep'
+import { SetupStep } from './SetupStep'
 import { FolderSelectionStep } from './FolderSelectionStep'
 import { AutoIndexStep } from './AutoIndexStep'
 import { PhotosStep } from './PhotosStep'
@@ -18,7 +19,7 @@ export interface OnboardingData {
   photosEnabled: boolean
 }
 
-const TOTAL_STEPS = 6
+const TOTAL_STEPS = 7
 
 export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Element {
   const [step, setStep] = useState(0)
@@ -43,14 +44,16 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
       case 1:
         return <ApiKeyStep data={data} updateData={updateData} onNext={next} onBack={back} />
       case 2:
+        return <SetupStep data={data} onNext={next} onBack={back} />
+      case 3:
         return (
           <FolderSelectionStep data={data} updateData={updateData} onNext={next} onBack={back} />
         )
-      case 3:
-        return <AutoIndexStep data={data} updateData={updateData} onNext={next} onBack={back} />
       case 4:
-        return <PhotosStep data={data} updateData={updateData} onNext={next} onBack={back} />
+        return <AutoIndexStep data={data} updateData={updateData} onNext={next} onBack={back} />
       case 5:
+        return <PhotosStep data={data} updateData={updateData} onNext={next} onBack={back} />
+      case 6:
         return <CompletionStep data={data} onComplete={onComplete} onBack={back} />
       default:
         return null
