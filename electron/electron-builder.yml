@@ -23,6 +23,7 @@ dmg:
       y: 220
       type: link
       path: /Applications
+afterPack: ./scripts/afterPack.js
 extraResources:
   - from: ../backend
     to: backend
