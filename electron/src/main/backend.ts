@@ -66,11 +66,9 @@ function findUvBinary(): string | null {
     join(home, '.local', 'bin', 'uv'),
     join(home, '.cargo', 'bin', 'uv'),
     '/usr/local/bin/uv',
-    '/opt/homebrew/bin/uv',
-    'uv' // fallback to PATH
+    '/opt/homebrew/bin/uv'
   ]
   for (const candidate of candidates) {
-    if (candidate === 'uv') return candidate // let spawn try PATH
     if (existsSync(candidate)) return candidate
   }
   return null
@@ -108,6 +106,10 @@ async function installUv(): Promise<string> {
     })
     installProcess.stderr?.on('data', (data: Buffer) => {
       output += data.toString()
+    })
+
+    installProcess.on('error', (err) => {
+      reject(new Error(`Failed to run uv installer: ${err.message}`))
     })
 
     installProcess.on('exit', (code) => {
@@ -204,6 +206,16 @@ export async function startBackend(apiKey?: string): Promise<void> {
     cwd: backendDir,
     env,
     stdio: ['ignore', 'pipe', 'pipe']
+  })
+
+  // Handle spawn errors (e.g. binary not found) to prevent uncaught exceptions
+  backendProcess.on('error', (err) => {
+    logStream?.write(`--- Backend spawn error: ${err.message} ---\n`)
+    backendProcess = null
+    if (!intentionallyStopped) {
+      setDetail('')
+      setStatus('error')
+    }
   })
 
   backendProcess.stdout?.pipe(logStream, { end: false })
