@@ -38,6 +38,16 @@ AI-powered semantic search for your Mac. Index local files and iCloud Photos, th
 
 Download the latest `.dmg` from the [Releases](../../releases) page, open it, and drag MemSearch to your Applications folder.
 
+### macOS: first launch
+
+MemSearch isn't notarized with Apple yet, so macOS may show a "MemSearch is damaged and can't be opened" message when you try to open it. Run this in Terminal once to clear the quarantine attribute:
+
+```bash
+xattr -cr /Applications/MemSearch.app
+```
+
+Then open the app normally.
+
 On first launch the app will:
 1. Ask for your [Google Gemini API key](https://aistudio.google.com/apikey) (free tier works)
 2. Let you pick folders to index

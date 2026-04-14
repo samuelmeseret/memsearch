@@ -142,16 +142,31 @@ export async function detectRunningBackend(): Promise<boolean> {
   return healthCheck()
 }
 
+async function killAnythingOnBackendPort(): Promise<void> {
+  // Any process holding 7242 is stale — Electron owns this port for MemSearch.
+  // Leaving an orphan means UI-driven API key changes silently no-op because
+  // the orphan keeps serving with its original (possibly expired) key.
+  await new Promise<void>((resolve) => {
+    const proc = spawn('sh', ['-c', `lsof -ti tcp:${BACKEND_PORT} | xargs -r kill -9 2>/dev/null; true`], {
+      stdio: 'ignore'
+    })
+    proc.on('exit', () => resolve())
+    proc.on('error', () => resolve())
+  })
+  // Give the kernel a moment to release the port before re-binding.
+  await new Promise((r) => setTimeout(r, 300))
+}
+
 export async function startBackend(apiKey?: string): Promise<void> {
   lastApiKey = apiKey
   intentionallyStopped = false
 
-  // Check if already running (Raycast or manual)
+  // If anything is already on the port, evict it. An orphan from a previous
+  // crash or a manual `uv run memsearch serve` would otherwise be adopted
+  // and the new API key would never take effect.
   if (await detectRunningBackend()) {
-    externalBackend = true
-    setDetail('')
-    setStatus('ready')
-    return
+    logStream?.write('--- Found existing backend on port; evicting before restart ---\n')
+    await killAnythingOnBackendPort()
   }
 
   // Find or install uv

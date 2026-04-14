@@ -181,6 +181,7 @@ class IndexingPipeline:
 
         try:
             # Phase 1: Scan all folders to get total file count
+            # Run in thread to avoid blocking the event loop (allows /status to respond)
             all_files: list[tuple[Path, str]] = []  # (file_path, folder_key)
             for folder in folders:
                 if self._cancel:
@@ -189,7 +190,9 @@ class IndexingPipeline:
                 limit_remaining = (limit - len(all_files)) if limit else None
                 if limit_remaining is not None and limit_remaining <= 0:
                     break
-                found, skipped = self._scan_folder(folder, limit_remaining)
+                found, skipped = await asyncio.to_thread(
+                    self._scan_folder, folder, limit_remaining
+                )
                 total_skipped += skipped
                 self._folder_progress[folder_key] = {
                     "total": len(found),
@@ -215,6 +218,8 @@ class IndexingPipeline:
                 else:
                     self._error_count += 1
                     self._folder_progress[folder_key]["errors"] += 1
+                # Yield to event loop so status polls can be served
+                await asyncio.sleep(0)
 
             elapsed = time.time() - self._start_time
             return {

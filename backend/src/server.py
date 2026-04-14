@@ -29,6 +29,7 @@ class AppState:
     pipeline: IndexingPipeline
     people_db: PeopleDatabase | None = None
     watcher: FileWatcher | None = None
+    photos_indexer: "PhotosIndexer | None" = None
 
 
 state = AppState()
@@ -144,17 +145,54 @@ async def search(req: SearchRequest) -> SearchResponse:
 
 @app.get("/status")
 async def status():
-    stats = state.store.stats()
+    # Run stats() in a thread so it doesn't block the event loop
+    stats = await asyncio.to_thread(state.store.stats)
     pipeline_status = state.pipeline.status
+    source: str | None = "files" if state.pipeline.is_indexing else None
+    phase: str | None = None
+    last_error: str | None = None
+    last_result: dict | None = None
+
+    # Merge photos indexer status. While active, it replaces the pipeline
+    # block. When idle, we still surface its last_error/last_result so the
+    # UI can show why a just-clicked run silently returned.
+    if state.photos_indexer:
+        ps = state.photos_indexer.status
+        if ps["is_indexing"]:
+            pipeline_status = {
+                "is_indexing": True,
+                "indexed_count": ps["indexed_count"],
+                "error_count": ps["error_count"],
+                "current_file": ps.get("current_asset", ""),
+                "total_files_found": ps.get("total_to_index", 0),
+                "errors": [],
+                "folder_progress": {},
+                "start_time": ps.get("start_time"),
+            }
+            source = "photos"
+            phase = ps.get("phase")
+        elif not state.pipeline.is_indexing:
+            # Expose the latest photos outcome for ~60s so the UI can display it.
+            finished_at = ps.get("last_finished_at") or 0.0
+            if finished_at and time.time() - finished_at < 60:
+                source = "photos"
+                phase = ps.get("phase")
+                last_error = ps.get("last_error")
+                last_result = ps.get("last_result")
+
     return {
         **stats,
         **pipeline_status,
+        "source": source,
+        "phase": phase,
+        "last_error": last_error,
+        "last_result": last_result,
     }
 
 
 @app.post("/index/start")
 async def start_indexing(req: IndexRequest | None = None):
-    if state.pipeline.is_indexing:
+    if state.pipeline.is_indexing or (state.photos_indexer and state.photos_indexer.is_indexing):
         raise HTTPException(400, "Indexing already in progress")
 
     folders = (req.folders if req and req.folders else settings.watched_folders)
@@ -176,19 +214,40 @@ async def start_indexing(req: IndexRequest | None = None):
 @app.post("/index/photos")
 async def start_photos_indexing(req: PhotosIndexRequest | None = None):
     """Index photos directly from iCloud Photos library."""
-    from .indexer.photos import PhotosIndexer
+    from .indexer.photos import PhotosIndexer, check_photos_access
+
+    if state.pipeline.is_indexing or (state.photos_indexer and state.photos_indexer.is_indexing):
+        raise HTTPException(400, "Indexing already in progress")
+
+    # Check Photos access synchronously so the user gets immediate feedback
+    # if permission hasn't been granted, instead of a silent no-op.
+    access = await asyncio.to_thread(check_photos_access)
+    if access != "authorized":
+        raise HTTPException(
+            403,
+            "Photos access not authorized. Grant access in System Settings → Privacy & Security → Photos, then try again.",
+        )
 
     # Refresh people data before indexing
     if state.people_db:
         state.people_db.refresh()
 
-    photos_indexer = PhotosIndexer(state.store, state.embedder, state.people_db)
+    indexer = PhotosIndexer(state.store, state.embedder, state.people_db)
+    # Mark in-progress NOW so a UI refresh right after this call sees it,
+    # rather than racing the background thread.
+    indexer.begin()
+    state.photos_indexer = indexer
 
     async def _run():
-        await photos_indexer.index_photos(
-            limit=req.limit if req else None,
-            favorites_only=req.favorites_only if req else False,
-        )
+        try:
+            await asyncio.to_thread(
+                indexer.index_photos,
+                limit=req.limit if req else None,
+                favorites_only=req.favorites_only if req else False,
+            )
+        except Exception as e:
+            # index_photos also records this, but log here in case it escapes.
+            print(f"Photos indexing task failed: {e}")
 
     asyncio.create_task(_run())
     return {"status": "started", "source": "icloud_photos"}
@@ -197,6 +256,8 @@ async def start_photos_indexing(req: PhotosIndexRequest | None = None):
 @app.post("/index/stop")
 async def stop_indexing():
     state.pipeline.cancel()
+    if state.photos_indexer:
+        state.photos_indexer.cancel()
     return {"status": "cancelling"}
 
 

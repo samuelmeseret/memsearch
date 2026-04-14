@@ -1,7 +1,7 @@
-import { app, BrowserWindow, shell, safeStorage } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { registerIpcHandlers } from './ipc'
+import { registerIpcHandlers, readApiKey } from './ipc'
 import {
   startBackend,
   stopBackend,
@@ -58,18 +58,6 @@ function createWindow(): void {
   }
 }
 
-function decryptApiKey(stored: string): string {
-  if (!stored) return ''
-  if (safeStorage.isEncryptionAvailable()) {
-    try {
-      return safeStorage.decryptString(Buffer.from(stored, 'base64'))
-    } catch {
-      return stored
-    }
-  }
-  return stored
-}
-
 async function isOnboardingComplete(): Promise<boolean> {
   const Store = (await import('electron-store')).default
   const store = new Store()
@@ -78,10 +66,7 @@ async function isOnboardingComplete(): Promise<boolean> {
 
 async function initBackend(): Promise<void> {
   try {
-    const Store = (await import('electron-store')).default
-    const store = new Store<{ apiKey: string }>()
-    const encrypted = store.get('apiKey', '')
-    const apiKey = decryptApiKey(encrypted)
+    const apiKey = await readApiKey()
     await startBackend(apiKey)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error starting backend'

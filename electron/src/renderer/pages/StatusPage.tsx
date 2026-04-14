@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   RefreshCw,
   Square,
@@ -13,10 +13,10 @@ import {
 } from 'lucide-react'
 import { StatusPanel } from '../components/StatusPanel'
 import { useStatus } from '../hooks/useStatus'
+import { useBackendHealth } from '../hooks/useBackendHealth'
 import {
   startIndexing,
   startPhotosIndexing,
-  stopIndexing,
   clearIndex,
   getConfig,
   updateConfig
@@ -31,6 +31,7 @@ function shortenPath(path: string): string {
 
 export default function StatusPage(): JSX.Element {
   const { status, isLoading, error, refresh } = useStatus()
+  const health = useBackendHealth()
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [apiKeyLoaded, setApiKeyLoaded] = useState(false)
@@ -39,10 +40,43 @@ export default function StatusPage(): JSX.Element {
     type: 'success' | 'error'
   } | null>(null)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  // Set when the user triggers a known-intentional restart (stop, restart
+  // button, API key change). Suppresses the hard "Cannot connect" banner
+  // during the expected downtime window.
+  const [isRestarting, setIsRestarting] = useState(false)
+  const restartGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     loadConfig()
     loadApiKey()
+  }, [])
+
+  // Clear the restart flag once the backend is back and serving status.
+  useEffect(() => {
+    if (isRestarting && health === 'connected' && status) {
+      setIsRestarting(false)
+      if (restartGuardRef.current) {
+        clearTimeout(restartGuardRef.current)
+        restartGuardRef.current = null
+      }
+    }
+  }, [isRestarting, health, status])
+
+  const beginRestart = (): void => {
+    setIsRestarting(true)
+    if (restartGuardRef.current) clearTimeout(restartGuardRef.current)
+    // Safety net: if the backend never comes back within 30s, stop suppressing
+    // the hard error so the user can see what's wrong.
+    restartGuardRef.current = setTimeout(() => {
+      setIsRestarting(false)
+      restartGuardRef.current = null
+    }, 30000)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (restartGuardRef.current) clearTimeout(restartGuardRef.current)
+    }
   }, [])
 
   const loadConfig = async (): Promise<void> => {
@@ -66,7 +100,8 @@ export default function StatusPage(): JSX.Element {
 
   const showMessage = (text: string, type: 'success' | 'error'): void => {
     setActionMessage({ text, type })
-    setTimeout(() => setActionMessage(null), 3000)
+    // Errors stay longer so the user can read permission instructions.
+    setTimeout(() => setActionMessage(null), type === 'error' ? 8000 : 3000)
   }
 
   const handleReindex = async (): Promise<void> => {
@@ -90,12 +125,27 @@ export default function StatusPage(): JSX.Element {
   }
 
   const handleStop = async (): Promise<void> => {
+    // The photos indexer can't be cancelled cleanly during a PhotoKit network
+    // download, so we restart the backend. Indexed state is persisted in
+    // ChromaDB, so the next run resumes from where this one stopped.
+    beginRestart()
     try {
-      await stopIndexing()
-      showMessage('Indexing stopping...', 'success')
+      showMessage('Stopping indexing…', 'success')
+      await window.api.restartBackend()
+      showMessage('Indexing stopped', 'success')
       refresh()
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Failed to stop', 'error')
+    }
+  }
+
+  const handleRestartBackend = async (): Promise<void> => {
+    beginRestart()
+    try {
+      await window.api.restartBackend()
+      refresh()
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Failed to restart backend', 'error')
     }
   }
 
@@ -111,9 +161,16 @@ export default function StatusPage(): JSX.Element {
   }
 
   const handleSaveApiKey = async (): Promise<void> => {
+    const trimmed = apiKey.trim()
+    if (!trimmed) {
+      showMessage('API key cannot be empty', 'error')
+      return
+    }
+    beginRestart()
     try {
-      await window.api.setApiKey(apiKey)
-      showMessage('API key saved, backend restarting...', 'success')
+      await window.api.setApiKey(trimmed)
+      setApiKey(trimmed)
+      showMessage('API key saved, backend restarting…', 'success')
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Failed to save API key', 'error')
     }
@@ -170,19 +227,26 @@ export default function StatusPage(): JSX.Element {
         </div>
       )}
 
-      {/* Error state */}
-      {error && (
+      {/* Connection banner. A soft "reconnecting" state covers expected
+          downtime (restart, API-key change, stop-during-indexing). The hard
+          error only shows once we're genuinely disconnected and not mid-restart. */}
+      {isRestarting || health === 'connecting' ? (
+        <div className="px-3 py-2 rounded-lg bg-muted/60 text-muted-foreground text-xs flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Reconnecting to backend…
+        </div>
+      ) : error && health === 'disconnected' ? (
         <div className="p-4 rounded-lg bg-destructive/10 text-destructive text-sm">
           <p className="font-medium">Cannot connect to backend</p>
           <p className="mt-1 text-xs opacity-80">{error}</p>
           <button
-            onClick={() => window.api.restartBackend()}
+            onClick={handleRestartBackend}
             className="mt-2 px-3 py-1 text-xs bg-destructive text-destructive-foreground rounded-md hover:opacity-90"
           >
             Restart Backend
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* Status panel */}
       {isLoading && !status ? (

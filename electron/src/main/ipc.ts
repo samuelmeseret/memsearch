@@ -2,24 +2,41 @@ import { ipcMain, shell, clipboard, dialog, BrowserWindow, safeStorage } from 'e
 import { exec } from 'child_process'
 import { restartBackend } from './backend'
 
-function encryptApiKey(key: string): string {
-  if (safeStorage.isEncryptionAvailable()) {
-    return safeStorage.encryptString(key).toString('base64')
-  }
-  return key
+function isLikelyPlaintextApiKey(s: string): boolean {
+  // Gemini keys: "AIza" prefix, alphanumerics + _-, ~39 chars total.
+  return /^AIza[\w-]{30,}$/.test(s)
 }
 
-function decryptApiKey(stored: string): string {
+// Reads the stored API key. The store holds plaintext; we best-effort migrate
+// any legacy safeStorage-encrypted value written by older builds.
+export async function readApiKey(): Promise<string> {
+  const Store = (await import('electron-store')).default
+  const store = new Store<{ apiKey: string }>()
+  const stored = store.get('apiKey', '')
   if (!stored) return ''
+  if (isLikelyPlaintextApiKey(stored)) return stored
+
+  // Legacy safeStorage blob. Try to decrypt once and rewrite as plaintext.
   if (safeStorage.isEncryptionAvailable()) {
     try {
-      return safeStorage.decryptString(Buffer.from(stored, 'base64'))
+      const decrypted = safeStorage.decryptString(Buffer.from(stored, 'base64'))
+      if (isLikelyPlaintextApiKey(decrypted)) {
+        store.set('apiKey', decrypted)
+        return decrypted
+      }
     } catch {
-      // Stored value was plaintext (pre-migration) — return as-is
-      return stored
+      // Undecryptable (e.g., app signing identity changed). Fall through to discard.
     }
   }
-  return stored
+
+  store.set('apiKey', '')
+  return ''
+}
+
+async function writeApiKey(key: string): Promise<void> {
+  const Store = (await import('electron-store')).default
+  const store = new Store<{ apiKey: string }>()
+  store.set('apiKey', key)
 }
 
 export function registerIpcHandlers(): void {
@@ -70,24 +87,15 @@ end tell`
   })
 
   ipcMain.handle('backend:restart', async () => {
-    const Store = (await import('electron-store')).default
-    const store = new Store<{ apiKey: string }>()
-    const encrypted = store.get('apiKey', '')
-    await restartBackend(decryptApiKey(encrypted))
+    await restartBackend(await readApiKey())
   })
 
   ipcMain.handle('config:get-api-key', async () => {
-    const Store = (await import('electron-store')).default
-    const store = new Store<{ apiKey: string }>()
-    const encrypted = store.get('apiKey', '')
-    return decryptApiKey(encrypted)
+    return readApiKey()
   })
 
   ipcMain.handle('config:set-api-key', async (_event, key: string) => {
-    const Store = (await import('electron-store')).default
-    const store = new Store<{ apiKey: string }>()
-    store.set('apiKey', encryptApiKey(key))
-    // Restart backend with new key (plaintext, passed as env var)
+    await writeApiKey(key)
     await restartBackend(key)
   })
 }

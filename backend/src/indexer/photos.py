@@ -8,7 +8,7 @@ Requires macOS Photos permission (System Settings → Privacy → Photos).
 import datetime
 import io
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 
 import objc
@@ -84,14 +84,19 @@ def fetch_all_assets(media_type: int | None = None, limit: int | None = None) ->
 
 
 def request_image_data(asset, timeout=120.0) -> tuple[bytes | None, str | None]:
+    # Synchronous mode blocks this thread until the handler fires, which
+    # works from any thread. Async mode requires the completion queue's
+    # run loop to be pumped, and PhotoKit does not deliver the callback
+    # on a Python ThreadPoolExecutor worker (asyncio.to_thread) — the
+    # indexer would hang forever at "Downloading...".
     options = PHImageRequestOptions.alloc().init()
-    options.setSynchronous_(False)
+    options.setSynchronous_(True)
     options.setNetworkAccessAllowed_(True)
     options.setVersion_(PHImageRequestOptionsVersionCurrent)
     options.setDeliveryMode_(PHImageRequestOptionsDeliveryModeHighQualityFormat)
     options.setResizeMode_(PHImageRequestOptionsResizeModeNone)
 
-    result = {"data": None, "uti": None, "done": False, "error": None}
+    result = {"data": None, "uti": None, "error": None}
 
     def handler(imageData, dataUTI, orientation, info):
         if imageData is not None:
@@ -101,21 +106,13 @@ def request_image_data(asset, timeout=120.0) -> tuple[bytes | None, str | None]:
             err = info.get("PHImageErrorKey")
             if err:
                 result["error"] = str(err)
-            if info.get("PHImageResultIsDegradedKey", False):
-                return
-        result["done"] = True
 
     PHImageManager.defaultManager().requestImageDataAndOrientationForAsset_options_resultHandler_(
         asset, options, handler
     )
-    deadline = time.time() + timeout
-    while not result["done"] and time.time() < deadline:
-        _pump_runloop(0.25)
 
     if result["error"]:
         print(f"    PhotoKit error: {result['error']}")
-    if not result["done"]:
-        return None, None
     return result["data"], result["uti"]
 
 
@@ -199,8 +196,11 @@ def embed_and_store(
     embedder: EmbeddingClient,
     store: VectorStore,
     people_db=None,
-) -> bool:
-    """Embed a prepared photo via Gemini and store in ChromaDB. Thread-safe."""
+) -> tuple[bool, str | None]:
+    """Embed a prepared photo via Gemini and store in ChromaDB. Thread-safe.
+
+    Returns (ok, error_message). On success, error_message is None.
+    """
     try:
         part = types.Part.from_bytes(data=photo.embed_bytes, mime_type="image/jpeg")
         embedding = embedder._embed_sync([part], "RETRIEVAL_DOCUMENT")
@@ -235,10 +235,11 @@ def embed_and_store(
             filename=display_name,
             person_names=person_names or None,
         )
-        return True
+        return True, None
     except Exception as e:
-        print(f"    Embed/store error: {e}")
-        return False
+        msg = f"{type(e).__name__}: {e}"
+        print(f"    Embed/store error: {msg}")
+        return False, msg
 
 
 class PhotosIndexer:
@@ -254,6 +255,12 @@ class PhotosIndexer:
         self._error_count = 0
         self._skipped_count = 0
         self._current_asset = ""
+        self._total_to_index = 0
+        self._start_time: float | None = None
+        self._phase: str = "idle"
+        self._last_error: str | None = None
+        self._last_result: dict | None = None
+        self._last_finished_at: float | None = None
 
     @property
     def is_indexing(self) -> bool:
@@ -267,7 +274,28 @@ class PhotosIndexer:
             "error_count": self._error_count,
             "skipped_count": self._skipped_count,
             "current_asset": self._current_asset,
+            "total_to_index": self._total_to_index,
+            "start_time": self._start_time,
+            "phase": self._phase,
+            "last_error": self._last_error,
+            "last_result": self._last_result,
+            "last_finished_at": self._last_finished_at,
         }
+
+    def begin(self) -> None:
+        """Mark the indexer as started so /status reflects it immediately,
+        before the background thread has a chance to run."""
+        self._is_indexing = True
+        self._cancel = False
+        self._indexed_count = 0
+        self._error_count = 0
+        self._skipped_count = 0
+        self._total_to_index = 0
+        self._current_asset = ""
+        self._start_time = time.time()
+        self._phase = "starting"
+        self._last_error = None
+        self._last_result = None
 
     def cancel(self):
         self._cancel = True
@@ -301,31 +329,37 @@ class PhotosIndexer:
         2. Fan out Gemini embed calls to a thread pool (N concurrent API calls)
         3. Collect results, repeat with next batch
         """
-        self._is_indexing = True
-        self._cancel = False
-        self._indexed_count = 0
-        self._error_count = 0
-        self._skipped_count = 0
-        start_time = time.time()
+        if not self._is_indexing:
+            self.begin()
+        start_time = self._start_time or time.time()
+        self._phase = "scanning_library"
 
         try:
             access = check_photos_access()
             if access != "authorized":
-                print("Photos access denied. Grant in System Settings → Privacy → Photos.")
-                return {"error": "access_denied", "indexed": 0}
+                msg = "Photos access denied. Grant in System Settings → Privacy → Photos."
+                print(msg)
+                self._last_error = msg
+                self._phase = "error"
+                self._last_result = {"error": "access_denied", "indexed": 0}
+                return self._last_result
 
             media_type = MEDIA_TYPE_IMAGE if images_only else None
             print("Fetching photo assets from library...")
+            self._current_asset = "Fetching asset list from Photos library…"
             assets = fetch_all_assets(media_type, limit)
             total = len(assets)
             print(f"Found {total} assets")
             print(f"Using {batch_size} concurrent embedding workers\n")
 
             # Filter to only un-indexed assets
+            self._phase = "filtering"
             to_index = []
-            for asset in assets:
+            for i, asset in enumerate(assets):
                 if self._cancel:
                     break
+                if i % 200 == 0:
+                    self._current_asset = f"Checking already-indexed photos ({i}/{total})…"
                 meta = get_asset_metadata(asset)
                 if favorites_only and not meta.get("favorite"):
                     self._skipped_count += 1
@@ -339,73 +373,93 @@ class PhotosIndexer:
                 print(f"Skipping {self._skipped_count} already-indexed photos")
 
             remaining = len(to_index)
+            self._total_to_index = remaining
+            self._phase = "indexing"
             print(f"Need to index {remaining} photos\n")
 
+            # Pipeline: download on this thread, submit each prepared photo
+            # for embedding immediately. A bounded in-flight window keeps
+            # Gemini concurrency capped at `batch_size` and makes progress
+            # counters advance per photo instead of per batch.
             executor = ThreadPoolExecutor(max_workers=batch_size)
+            pending: set = set()
 
-            # Process in batches
-            for batch_start in range(0, remaining, batch_size):
+            def drain(block: bool) -> None:
+                """Collect any completed embed futures and update counters."""
+                nonlocal pending
+                if not pending:
+                    return
+                if block:
+                    done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                else:
+                    done = {f for f in pending if f.done()}
+                    pending -= done
+                for fut in done:
+                    err_msg: str | None = None
+                    try:
+                        ok, err_msg = fut.result()
+                    except Exception as e:
+                        err_msg = f"{type(e).__name__}: {e}"
+                        print(f"    Embed task error: {err_msg}")
+                        ok = False
+                    if ok:
+                        self._indexed_count += 1
+                    else:
+                        self._error_count += 1
+                        # Surface the first embedding failure so the UI
+                        # can show *why* 0 photos indexed (e.g. expired
+                        # API key), instead of a silent error count.
+                        if err_msg and not self._last_error:
+                            self._last_error = err_msg
+
+            for i, (asset, meta) in enumerate(to_index):
                 if self._cancel:
                     print("Indexing cancelled.")
                     break
 
-                batch_end = min(batch_start + batch_size, remaining)
-                batch = to_index[batch_start:batch_end]
-                batch_num = batch_start // batch_size + 1
-                total_batches = (remaining + batch_size - 1) // batch_size
+                # Cap in-flight embeds so we don't queue 1000s of jobs.
+                while len(pending) >= batch_size and not self._cancel:
+                    drain(block=True)
 
-                elapsed = time.time() - start_time
-                rate = self._indexed_count / elapsed if elapsed > 0 and self._indexed_count > 0 else 0
-                eta = (remaining - batch_start) / rate if rate > 0 else 0
-                eta_str = f" | ETA: {int(eta//60)}m{int(eta%60)}s" if rate > 0 else ""
+                pos = i + 1
+                ts = meta.get("creation_date")
+                if ts:
+                    label = f"Photo {datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')}"
+                else:
+                    label = f"Photo {pos}"
+                self._phase = "downloading"
+                self._current_asset = f"Downloading {label} ({pos}/{remaining})"
 
-                print(f"── Batch {batch_num}/{total_batches} ({batch_size} photos){eta_str} ──")
-
-                # Phase 1: Download & process on main thread
-                prepared: list[PreparedPhoto] = []
-                for j, (asset, meta) in enumerate(batch):
-                    if self._cancel:
-                        break
-                    file_id = self._make_file_id(asset)
-                    self._current_asset = meta.get("local_identifier", "")
-                    pos = batch_start + j + 1
-
-                    print(f"  [{pos}/{remaining}] Downloading...", end=" ", flush=True)
-                    image_data, uti = request_image_data(asset)
-                    if image_data is None:
-                        print("FAILED")
-                        self._error_count += 1
-                        continue
-
-                    photo = prepare_photo(image_data, file_id, meta)
-                    if photo is None:
-                        print("FAILED")
-                        self._error_count += 1
-                        continue
-
-                    print(f"{len(image_data)//1024}KB", flush=True)
-                    prepared.append(photo)
-
-                if not prepared:
+                print(f"  [{pos}/{remaining}] Downloading...", end=" ", flush=True)
+                image_data, _uti = request_image_data(asset)
+                if image_data is None:
+                    print("FAILED")
+                    self._error_count += 1
+                    drain(block=False)
                     continue
 
-                # Phase 2: Embed concurrently via thread pool
-                print(f"  Embedding {len(prepared)} photos concurrently...", end=" ", flush=True)
-                embed_start = time.time()
+                file_id = self._make_file_id(asset)
+                photo = prepare_photo(image_data, file_id, meta)
+                if photo is None:
+                    print("FAILED")
+                    self._error_count += 1
+                    drain(block=False)
+                    continue
 
-                futures = {
-                    executor.submit(embed_and_store, photo, self.embedder, self.store, self.people_db): photo
-                    for photo in prepared
-                }
+                print(f"{len(image_data)//1024}KB — queued for embedding", flush=True)
+                self._phase = "embedding"
+                fut = executor.submit(
+                    embed_and_store, photo, self.embedder, self.store, self.people_db
+                )
+                pending.add(fut)
 
-                for future in as_completed(futures):
-                    if future.result():
-                        self._indexed_count += 1
-                    else:
-                        self._error_count += 1
+                # Opportunistically harvest any already-finished futures so
+                # the counter moves while we're still downloading.
+                drain(block=False)
 
-                embed_time = time.time() - embed_start
-                print(f"done ({embed_time:.1f}s)\n")
+            # Drain remaining embeds.
+            while pending and not self._cancel:
+                drain(block=True)
 
             executor.shutdown(wait=False)
 
@@ -418,7 +472,7 @@ class PhotosIndexer:
             if self._skipped_count:
                 print(f"Skipped: {self._skipped_count}")
 
-            return {
+            result = {
                 "indexed": self._indexed_count,
                 "errors": self._error_count,
                 "skipped": self._skipped_count,
@@ -426,6 +480,15 @@ class PhotosIndexer:
                 "elapsed_seconds": round(elapsed, 1),
                 "cancelled": self._cancel,
             }
+            self._last_result = result
+            self._phase = "cancelled" if self._cancel else "done"
+            return result
+        except Exception as e:
+            self._last_error = f"{type(e).__name__}: {e}"
+            self._phase = "error"
+            print(f"Photos indexing error: {self._last_error}")
+            raise
         finally:
             self._is_indexing = False
             self._current_asset = ""
+            self._last_finished_at = time.time()

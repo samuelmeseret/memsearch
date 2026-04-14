@@ -66,7 +66,9 @@ export function SearchBar({
     onQueryChange(buildFullQuery(value, selectedPeople))
   }
 
-  // The display text in the input (without @mentions)
+  // The display text in the input (without @mentions).
+  // Preserve trailing whitespace so the user can type multi-word queries —
+  // trimming would strip the space on every keystroke (controlled input).
   const displayText = (() => {
     let text = query
     for (const name of selectedPeople) {
@@ -74,7 +76,7 @@ export function SearchBar({
       const unquoted = `@${name}`
       text = text.replace(quoted, '').replace(unquoted, '')
     }
-    return text.trim()
+    return text.replace(/^\s+/, '').replace(/ {2,}/g, ' ')
   })()
 
   const selectPerson = (name: string): void => {

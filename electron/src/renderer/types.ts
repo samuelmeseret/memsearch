@@ -33,6 +33,18 @@ export interface IndexStatus {
   errors: Array<{ file_path: string; error: string }>
   folder_progress: Record<string, { total: number; indexed: number; errors: number }>
   start_time: number | null
+  source: 'files' | 'photos' | null
+  phase: string | null
+  last_error: string | null
+  last_result: {
+    indexed: number
+    errors: number
+    skipped?: number
+    total_assets?: number
+    elapsed_seconds?: number
+    cancelled?: boolean
+    error?: string
+  } | null
 }
 
 export interface AppConfig {

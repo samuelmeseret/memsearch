@@ -8,6 +8,8 @@ import {
   ChevronDown,
   ChevronRight,
   AlertCircle,
+  CheckCircle2,
+  Camera,
   Folder
 } from 'lucide-react'
 import * as Progress from '@radix-ui/react-progress'
@@ -44,9 +46,22 @@ function shortenPath(path: string): string {
   return path
 }
 
+const PHASE_LABEL: Record<string, string> = {
+  starting: 'Starting…',
+  scanning_library: 'Fetching photo library…',
+  filtering: 'Checking for new photos…',
+  indexing: 'Indexing…',
+  downloading: 'Downloading from iCloud…',
+  embedding: 'Generating embeddings…',
+}
+
 function IndexingProgress({ status }: { status: IndexStatus }): JSX.Element {
   const [showFolders, setShowFolders] = useState(false)
   const [showErrors, setShowErrors] = useState(false)
+
+  const isPhotos = status.source === 'photos'
+  const noun = isPhotos ? 'photos' : 'files'
+  const Noun = isPhotos ? 'Photos' : 'Files'
 
   const done = status.indexed_count + status.error_count
   const total = status.total_files_found
@@ -64,15 +79,26 @@ function IndexingProgress({ status }: { status: IndexStatus }): JSX.Element {
 
   const folderEntries = Object.entries(status.folder_progress || {})
 
+  const headerLabel = isScanning
+    ? isPhotos
+      ? 'Preparing Photos…'
+      : 'Scanning Files…'
+    : isPhotos
+      ? 'Indexing Photos'
+      : 'Indexing in Progress'
+
+  const phaseLabel = status.phase ? PHASE_LABEL[status.phase] : null
+
   return (
     <div className="bg-card border border-border rounded-lg p-4 space-y-3">
       {/* Header with status badge */}
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-muted-foreground">
-          {isScanning ? 'Scanning Files...' : 'Indexing in Progress'}
+        <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          {isPhotos && <Camera className="w-3.5 h-3.5" />}
+          {headerLabel}
         </p>
         <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-          {isScanning ? 'Scanning' : percentage >= 100 ? 'Completing' : 'Indexing'}
+          {isScanning ? 'Preparing' : percentage >= 100 ? 'Completing' : 'Indexing'}
         </span>
       </div>
 
@@ -93,13 +119,13 @@ function IndexingProgress({ status }: { status: IndexStatus }): JSX.Element {
       <div className="flex items-center justify-between text-sm">
         <span className="text-card-foreground">
           {isScanning ? (
-            'Discovering files...'
+            phaseLabel ?? `Discovering ${noun}...`
           ) : (
             <>
               <span className="font-medium">{done.toLocaleString()}</span>
               {' of '}
               <span className="font-medium">{total.toLocaleString()}</span>
-              {' files '}
+              {' '}{Noun.toLowerCase()}{' '}
               <span className="text-muted-foreground">({percentage}%)</span>
             </>
           )}
@@ -109,10 +135,12 @@ function IndexingProgress({ status }: { status: IndexStatus }): JSX.Element {
         )}
       </div>
 
-      {/* Current file */}
-      {status.current_file && (
+      {/* Phase / current item detail */}
+      {(phaseLabel || status.current_file) && (
         <p className="text-xs text-muted-foreground truncate">
-          {status.current_file.split('/').pop()}
+          {isPhotos
+            ? status.current_file || phaseLabel
+            : status.current_file?.split('/').pop() || phaseLabel}
         </p>
       )}
 
@@ -238,10 +266,68 @@ export function StatusPanel({ status }: StatusPanelProps): JSX.Element {
       {/* Indexing progress */}
       {status.is_indexing && <IndexingProgress status={status} />}
 
+      {/* Recent photos-indexing outcome (backend surfaces this for ~60s after finish) */}
+      {!status.is_indexing && status.source === 'photos' && (status.last_error || status.last_result) && (
+        <PhotosOutcome
+          lastError={status.last_error}
+          lastResult={status.last_result}
+          phase={status.phase}
+        />
+      )}
+
       {/* Post-indexing error summary (shown after indexing completes if there were errors) */}
       {!status.is_indexing && status.errors?.length > 0 && (
         <PostIndexErrors errors={status.errors} errorCount={status.error_count} />
       )}
+    </div>
+  )
+}
+
+function PhotosOutcome({
+  lastError,
+  lastResult,
+  phase
+}: {
+  lastError: string | null
+  lastResult: IndexStatus['last_result']
+  phase: string | null
+}): JSX.Element {
+  if (lastError || phase === 'error') {
+    return (
+      <div className="bg-destructive/5 border border-destructive/20 rounded-lg p-4 flex items-start gap-2">
+        <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+        <div className="text-sm text-destructive-foreground">
+          <p className="font-medium text-destructive">Photos indexing failed</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {lastError ?? 'Unknown error — check backend logs.'}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!lastResult) return <></>
+
+  const indexed = lastResult.indexed ?? 0
+  const errs = lastResult.errors ?? 0
+  const skipped = lastResult.skipped ?? 0
+  const cancelled = !!lastResult.cancelled
+  const elapsed = lastResult.elapsed_seconds ?? 0
+
+  return (
+    <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 flex items-start gap-2">
+      <CheckCircle2 className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+      <div className="text-sm flex-1">
+        <p className="font-medium text-card-foreground">
+          {cancelled ? 'Photos indexing cancelled' : 'Photos indexing complete'}
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Indexed <span className="font-medium text-card-foreground">{indexed.toLocaleString()}</span>
+          {skipped > 0 && <> · {skipped.toLocaleString()} already up to date</>}
+          {errs > 0 && <> · <span className="text-destructive">{errs} errors</span></>}
+          {elapsed > 0 && <> · {Math.round(elapsed)}s</>}
+        </p>
+      </div>
     </div>
   )
 }

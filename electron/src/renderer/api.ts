@@ -28,22 +28,42 @@ export async function search(
 }
 
 export async function getStatus(): Promise<IndexStatus> {
-  const res = await fetch(`${BASE_URL}/status`)
-  if (!res.ok) throw new Error(`Status failed: ${res.statusText}`)
-  const data = await res.json()
-  return {
-    total: data.total ?? 0,
-    modalities: data.modalities ?? {},
-    last_indexed_at: data.last_indexed_at ?? null,
-    is_indexing: data.is_indexing ?? false,
-    indexed_count: data.indexed_count ?? 0,
-    error_count: data.error_count ?? 0,
-    current_file: data.current_file ?? '',
-    total_files_found: data.total_files_found ?? 0,
-    errors: data.errors ?? [],
-    folder_progress: data.folder_progress ?? {},
-    start_time: data.start_time ?? null,
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  try {
+    const res = await fetch(`${BASE_URL}/status`, { signal: controller.signal })
+    if (!res.ok) throw new Error(`Status failed: ${res.statusText}`)
+    const data = await res.json()
+    return {
+      total: data.total ?? 0,
+      modalities: data.modalities ?? {},
+      last_indexed_at: data.last_indexed_at ?? null,
+      is_indexing: data.is_indexing ?? false,
+      indexed_count: data.indexed_count ?? 0,
+      error_count: data.error_count ?? 0,
+      current_file: data.current_file ?? '',
+      total_files_found: data.total_files_found ?? 0,
+      errors: data.errors ?? [],
+      folder_progress: data.folder_progress ?? {},
+      start_time: data.start_time ?? null,
+      source: data.source ?? null,
+      phase: data.phase ?? null,
+      last_error: data.last_error ?? null,
+      last_result: data.last_result ?? null,
+    }
+  } finally {
+    clearTimeout(timeout)
   }
+}
+
+async function readErrorDetail(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json()
+    if (body?.detail) return String(body.detail)
+  } catch {
+    /* non-JSON body */
+  }
+  return `${fallback}: ${res.statusText}`
 }
 
 export async function startIndexing(folders?: string[], limit?: number): Promise<void> {
@@ -52,7 +72,7 @@ export async function startIndexing(folders?: string[], limit?: number): Promise
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ folders, limit })
   })
-  if (!res.ok) throw new Error(`Start indexing failed: ${res.statusText}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res, 'Start indexing failed'))
 }
 
 export async function startPhotosIndexing(
@@ -64,12 +84,7 @@ export async function startPhotosIndexing(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ limit, favorites_only: favoritesOnly || false })
   })
-  if (!res.ok) throw new Error(`Photos indexing failed: ${res.statusText}`)
-}
-
-export async function stopIndexing(): Promise<void> {
-  const res = await fetch(`${BASE_URL}/index/stop`, { method: 'POST' })
-  if (!res.ok) throw new Error(`Stop indexing failed: ${res.statusText}`)
+  if (!res.ok) throw new Error(await readErrorDetail(res, 'Photos indexing failed'))
 }
 
 export async function clearIndex(): Promise<void> {
