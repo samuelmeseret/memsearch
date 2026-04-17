@@ -124,6 +124,29 @@ export default function StatusPage(): JSX.Element {
     }
   }
 
+  const handleIndexFolder = async (): Promise<void> => {
+    if (!config || status?.is_indexing) return
+    try {
+      const selected = await window.api.selectFolders()
+      if (selected.length === 0) return
+      const newFolders = selected.filter((f) => !config.watched_folders.includes(f))
+      if (newFolders.length > 0) {
+        const merged = [...config.watched_folders, ...newFolders]
+        await updateConfig({ watched_folders: merged })
+        setConfig({ ...config, watched_folders: merged })
+      }
+      await startIndexing(selected)
+      const msg =
+        selected.length === 1
+          ? `Indexing ${shortenPath(selected[0])}…`
+          : `Indexing ${selected.length} folders…`
+      showMessage(msg, 'success')
+      refresh()
+    } catch (err) {
+      showMessage(err instanceof Error ? err.message : 'Failed to index folder', 'error')
+    }
+  }
+
   const handleStop = async (): Promise<void> => {
     // The photos indexer can't be cancelled cleanly during a PhotoKit network
     // download, so we restart the backend. Indexed state is persisted in
@@ -173,20 +196,6 @@ export default function StatusPage(): JSX.Element {
       showMessage('API key saved, backend restarting…', 'success')
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Failed to save API key', 'error')
-    }
-  }
-
-  const handleAddFolders = async (): Promise<void> => {
-    if (!config) return
-    try {
-      const selected = await window.api.selectFolders()
-      if (selected.length === 0) return
-      const existing = new Set(config.watched_folders)
-      const merged = [...config.watched_folders, ...selected.filter((f) => !existing.has(f))]
-      await updateConfig({ watched_folders: merged })
-      setConfig({ ...config, watched_folders: merged })
-    } catch (err) {
-      showMessage(err instanceof Error ? err.message : 'Failed to add folders', 'error')
     }
   }
 
@@ -258,6 +267,25 @@ export default function StatusPage(): JSX.Element {
         <StatusPanel status={status} />
       ) : null}
 
+      {/* Empty-state CTA */}
+      {config && config.watched_folders.length === 0 && !status?.is_indexing && (
+        <div className="bg-card border border-dashed border-border rounded-lg p-6 text-center">
+          <Folder className="w-6 h-6 mx-auto text-muted-foreground" />
+          <p className="mt-2 text-sm font-medium text-card-foreground">No folders indexed yet</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Pick a folder on your Mac to get started.
+          </p>
+          <button
+            onClick={handleIndexFolder}
+            disabled={health !== 'connected'}
+            className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <FolderPlus className="w-3.5 h-3.5" />
+            Choose a Folder…
+          </button>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="space-y-2">
         <p className="text-xs font-medium text-muted-foreground">Actions</p>
@@ -278,6 +306,14 @@ export default function StatusPage(): JSX.Element {
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 Reindex All
+              </button>
+              <button
+                onClick={handleIndexFolder}
+                disabled={health !== 'connected'}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-secondary text-secondary-foreground rounded-md hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
+                Index a Folder…
               </button>
               <button
                 onClick={handlePhotos}
@@ -358,7 +394,7 @@ export default function StatusPage(): JSX.Element {
               Watched Folders
             </label>
             <button
-              onClick={handleAddFolders}
+              onClick={handleIndexFolder}
               className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-secondary text-secondary-foreground rounded-md hover:opacity-80 border border-border"
             >
               <FolderPlus className="w-3 h-3" />
