@@ -65,6 +65,11 @@ export function registerIpcHandlers(): void {
     return shell.openPath(filePath)
   })
 
+  ipcMain.handle('shell:open-external', async (_event, url: string) => {
+    if (!/^https?:\/\//i.test(url)) return
+    await shell.openExternal(url)
+  })
+
   ipcMain.handle('shell:show-in-finder', async (_event, filePath: string) => {
     shell.showItemInFolder(filePath)
   })

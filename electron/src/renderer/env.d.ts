@@ -3,6 +3,7 @@
 interface Window {
   api: {
     openFile: (path: string) => Promise<string>
+    openExternal: (url: string) => Promise<void>
     showInFinder: (path: string) => Promise<void>
     openInPhotos: (id: string) => Promise<void>
     copyToClipboard: (text: string) => Promise<void>

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 const api = {
   openFile: (path: string): Promise<string> => ipcRenderer.invoke('shell:open-file', path),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
   showInFinder: (path: string): Promise<void> => ipcRenderer.invoke('shell:show-in-finder', path),
   openInPhotos: (id: string): Promise<void> => ipcRenderer.invoke('shell:open-in-photos', id),
   copyToClipboard: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:copy', text),

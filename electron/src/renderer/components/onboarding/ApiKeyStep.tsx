@@ -53,7 +53,7 @@ export function ApiKeyStep({ data, updateData, onNext, onBack }: ApiKeyStepProps
           className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
           onClick={(e) => {
             e.preventDefault()
-            window.api.openFile('https://aistudio.google.com/apikey')
+            window.api.openExternal('https://aistudio.google.com/apikey')
           }}
         >
           Get a free API key from Google AI Studio
