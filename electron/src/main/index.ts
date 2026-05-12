@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { registerIpcHandlers, readApiKey } from './ipc'
+import { initAutoUpdater } from './updater'
 import {
   startBackend,
   stopBackend,
@@ -84,6 +85,7 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers()
   createWindow()
+  initAutoUpdater(() => mainWindow)
 
   // Only start backend automatically if onboarding is already done.
   // During onboarding, the SetupStep handles starting the backend.

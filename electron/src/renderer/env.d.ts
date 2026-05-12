@@ -14,5 +14,16 @@ interface Window {
     selectFolders: () => Promise<string[]>
     getStoreValue: (key: string) => Promise<unknown>
     setStoreValue: (key: string, value: unknown) => Promise<void>
+    checkForUpdates: () => Promise<void>
+    downloadUpdate: () => Promise<void>
+    installUpdate: () => Promise<void>
+    onUpdateChecking: (cb: () => void) => void
+    onUpdateAvailable: (cb: (info: { version: string; releaseNotes?: string | null }) => void) => void
+    onUpdateNotAvailable: (cb: (info: { version: string }) => void) => void
+    onDownloadProgress: (
+      cb: (progress: { percent: number; bytesPerSecond: number; transferred: number; total: number }) => void
+    ) => void
+    onUpdateDownloaded: (cb: (info: { version: string }) => void) => void
+    onUpdateError: (cb: (err: { message: string }) => void) => void
   }
 }

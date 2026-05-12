@@ -9,7 +9,8 @@ import {
   X,
   Loader2,
   Folder,
-  Eye
+  Eye,
+  Download
 } from 'lucide-react'
 import { StatusPanel } from '../components/StatusPanel'
 import { useStatus } from '../hooks/useStatus'
@@ -45,6 +46,10 @@ export default function StatusPage(): JSX.Element {
   // during the expected downtime window.
   const [isRestarting, setIsRestarting] = useState(false)
   const restartGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<
+    'idle' | 'checking' | 'up-to-date'
+  >('idle')
+  const upToDateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     loadConfig()
@@ -76,7 +81,33 @@ export default function StatusPage(): JSX.Element {
   useEffect(() => {
     return () => {
       if (restartGuardRef.current) clearTimeout(restartGuardRef.current)
+      if (upToDateTimerRef.current) clearTimeout(upToDateTimerRef.current)
     }
+  }, [])
+
+  useEffect(() => {
+    const clearUpToDateTimer = (): void => {
+      if (upToDateTimerRef.current) {
+        clearTimeout(upToDateTimerRef.current)
+        upToDateTimerRef.current = null
+      }
+    }
+    window.api.onUpdateAvailable(() => {
+      clearUpToDateTimer()
+      setUpdateCheckStatus('idle')
+    })
+    window.api.onUpdateNotAvailable(() => {
+      clearUpToDateTimer()
+      setUpdateCheckStatus('up-to-date')
+      upToDateTimerRef.current = setTimeout(() => {
+        setUpdateCheckStatus('idle')
+        upToDateTimerRef.current = null
+      }, 4000)
+    })
+    window.api.onUpdateError(() => {
+      clearUpToDateTimer()
+      setUpdateCheckStatus('idle')
+    })
   }, [])
 
   const loadConfig = async (): Promise<void> => {
@@ -196,6 +227,17 @@ export default function StatusPage(): JSX.Element {
       showMessage('API key saved, backend restarting…', 'success')
     } catch (err) {
       showMessage(err instanceof Error ? err.message : 'Failed to save API key', 'error')
+    }
+  }
+
+  const handleCheckForUpdates = async (): Promise<void> => {
+    if (updateCheckStatus === 'checking') return
+    setUpdateCheckStatus('checking')
+    try {
+      await window.api.checkForUpdates()
+    } catch (err) {
+      setUpdateCheckStatus('idle')
+      showMessage(err instanceof Error ? err.message : 'Failed to check for updates', 'error')
     }
   }
 
@@ -423,6 +465,33 @@ export default function StatusPage(): JSX.Element {
               </button>
             </div>
           ))}
+        </div>
+
+        {/* App updates */}
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <label className="flex items-center gap-1.5 text-sm text-card-foreground">
+              <Download className="w-3.5 h-3.5" />
+              App updates
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {updateCheckStatus === 'up-to-date'
+                ? "You're on the latest version"
+                : 'Check GitHub for a new release'}
+            </p>
+          </div>
+          <button
+            onClick={handleCheckForUpdates}
+            disabled={updateCheckStatus === 'checking'}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-secondary text-secondary-foreground rounded-md border border-border hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {updateCheckStatus === 'checking' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5" />
+            )}
+            {updateCheckStatus === 'checking' ? 'Checking…' : 'Check for updates'}
+          </button>
         </div>
       </div>
 

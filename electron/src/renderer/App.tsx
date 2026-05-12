@@ -3,6 +3,7 @@ import SearchPage from './pages/SearchPage'
 import StatusPage from './pages/StatusPage'
 import { useBackendHealth } from './hooks/useBackendHealth'
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard'
+import { UpdateBanner } from './components/UpdateBanner'
 
 type Tab = 'search' | 'status'
 
@@ -40,6 +41,7 @@ export default function App(): JSX.Element {
         {/* Title bar drag region */}
         <div className="h-12 shrink-0 app-drag-region" />
         <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+        <UpdateBanner />
       </div>
     )
   }
@@ -81,6 +83,7 @@ export default function App(): JSX.Element {
       <main className="flex-1 overflow-hidden">
         {activeTab === 'search' ? <SearchPage /> : <StatusPage />}
       </main>
+      <UpdateBanner />
     </div>
   )
 }

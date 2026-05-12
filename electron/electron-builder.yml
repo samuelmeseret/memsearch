@@ -12,9 +12,17 @@ files:
 mac:
   category: public.app-category.productivity
   target:
-    - dmg
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
   icon: resources/icon.icns
   identity: null
+publish:
+  provider: github
+  owner: samuelmeseret
+  repo: memsearch
+  releaseType: release
 dmg:
   contents:
     - x: 130

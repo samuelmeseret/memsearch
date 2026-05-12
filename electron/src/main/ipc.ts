@@ -1,6 +1,7 @@
 import { ipcMain, shell, clipboard, dialog, BrowserWindow, safeStorage } from 'electron'
 import { exec } from 'child_process'
 import { restartBackend } from './backend'
+import { checkForUpdates, downloadUpdate, quitAndInstall } from './updater'
 
 function isLikelyPlaintextApiKey(s: string): boolean {
   // Gemini keys: "AIza" prefix, alphanumerics + _-, ~39 chars total.
@@ -98,4 +99,8 @@ end tell`
     await writeApiKey(key)
     await restartBackend(key)
   })
+
+  ipcMain.handle('update:check', () => checkForUpdates())
+  ipcMain.handle('update:download', () => downloadUpdate())
+  ipcMain.handle('update:install', () => quitAndInstall())
 }
